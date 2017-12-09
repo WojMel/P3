@@ -7,4 +7,7 @@ Realizacja zadania przez implementację następujących funkcji:
 * `void *realloc(void *ptr, size_t size);`
 * `void * reallocarray(void *ptr, size_t nmemb, size_t size);`
 
-Implementacja będzie zgodna ze specyfikacją [POSIX](http://pubs.opengroup.org/onlinepubs/9699919799/)
+Praca będzie:
+* zgodna ze specyfikacją [POSIX](http://pubs.opengroup.org/onlinepubs/9699919799/)
+* implementować algorytm Buddy
+* używać `sys/mman.h`
