@@ -14,5 +14,5 @@ Praca będzie:
 * używać `sys/mman.h`, `unistd.h`
 
 Pamięć będzie przydzielana w blokach długości `2^k` lub `PAGE_SIZE*k`, gdzie `k` będzie najmniejszą taką liczbą spełniającą żądanie oraz `PAGE_SIZE` to rozmiar strony pobrany z systemu.
-Praca będzie bazować na zarządzaniu stronami. Dla żądania mniejszego niż długość strony przydzielony będzie wolny blok z zażądzanych ston, jeśli taki blok nie istnieje lub nie będzie można takiego utworzyć to blok zostanie przydzielony z nowej strony. Dla żądań niemniejszych niż długość strony przydzielona będzie minimalna ilość stron spełniająca żądanie.
+Praca będzie bazować na zarządzaniu stronami. Dla żądania mniejszego niż długość strony przydzielony będzie wolny blok z zarządzanych ston, jeśli taki blok nie istnieje lub nie będzie można takiego utworzyć to blok zostanie przydzielony z nowej strony. Dla żądań niemniejszych niż długość strony przydzielona będzie minimalna ilość stron spełniająca żądanie.
 
