@@ -1,4 +1,4 @@
-Implementacja systemu zarządzania pamięcią w oparciu o algorytm bliźniaków.
+Implementacja zarządcy pamięci w oparciu o system bliźniaków.
 
 Realizacja zadania przez implementację następujących funkcji:
 * `void *malloc(size_t size);`
@@ -9,8 +9,8 @@ Realizacja zadania przez implementację następujących funkcji:
 
 Praca będzie:
 * zgodna ze specyfikacją [POSIX](http://pubs.opengroup.org/onlinepubs/9699919799/)
-* implementować algorytm Buddy
-* thread-safe
+* implementować system bliźniaków
+* wątkowo bezpieczna
 * używać `sys/mman.h`, `unistd.h`
 
 Pamięć będzie przydzielana w blokach długości `2^k` lub `PAGE_SIZE*k`, gdzie `k` będzie najmniejszą taką liczbą spełniającą żądanie oraz `PAGE_SIZE` to rozmiar strony pobrany z systemu.
