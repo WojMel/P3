@@ -13,7 +13,7 @@
 bool MM_RUNNING = false;
 size_t PAGE_SIZE = sysconf(_SC_PAGESIZE);
 size_t num_pages = 0;
-void *page_tree = NULL;
+void **page_tree = NULL;
 size_t page_adrs_cap = 0;
 void **page_adrs = NULL;
 
@@ -47,8 +47,14 @@ void *malloc(size_t size){
    to_slot_size(&size);
 
    void *ptr = find_slot( size >> 2 );
-   // brak miejsca 
-   // dodanie nowej strony 
+
+   if( ptr == NULL ){
+      // to-do
+      // dodanie strony
+      // find_slot_page dla nowej stony   
+   }
+
+   return ptr;
 }
 
 void *realloc(void *ptr, size_t size){
@@ -66,8 +72,15 @@ void *realloc(void *ptr, size_t size){
 }
 
 void free(void *ptr){
-   // usun z drzewa
-   // jesli w pamieci tylko drzewo i tablica stron mm_cleanup
+   // to-do
+
+   size_t i = 0;
+   while( (ptr < page_adrs[i] || ptr >= (uint8_t)(page_adrs[i]) + PAGE_SIZE) && i < num_pages ) ++i;
+   if( i >= num_pages ) return;
+
+   void *tree = 
+
+   // free slot and upadte tree
 }
 
 static inline void to_slot_size(size_t *size){
@@ -91,11 +104,26 @@ void mm_startup(){
    */
    void *page = mmap(0, PAGE_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
 
-   page_tree = page;
-   setbit(page_tree, 0);
-   find_slot_page(page_tree, page, PAGE_SIZE >> 6);
+   // temporary space for page_tree's and page_adres's
+   void *temp_page_tree[1];
+   void *temp_page_adrs[1];
+   page_tree = temp_page_tree;
+   page_adrs = temp_page_adrs;
 
-   page_adrs = find_slot_page(page_tree, page, sizeof(void*));
+   page_adrs[0] = page;
+   page_tree[0] = page;
+   setbit(page_tree[0], 0);
+   // creating space for page_tree[0]
+   find_slot_page(page_tree[0], page_adrs[0], PAGE_SIZE >> 6); // == page_tree[0]
+
+   // creating space for page_tree
+   page_tree = find_slot_page(page_tree[0], page_adrs[0], sizeof(void*));
+   page_tree[0] = temp_page_tree[0];
+
+   // creating space for page_adrs
+   page_adrs = find_slot_page(page_tree[0], page_adrs[0], sizeof(void*));
+   page_adrs[0] = temp_page_adrs[0];
+
    page_adrs_cap = 1;
    page_adrs[0] = page;
    ++num_pages;
@@ -103,24 +131,17 @@ void mm_startup(){
    MM_RUNNING = true;
 }
 
-void mm_cleanup(){
-
-   // to-do
-
-   MM_RUNNING = false;
-}
-
 
 void *find_slot_page(void *tree, void *page, size_t k){
    /*
-      Znajduje slot dlugosci k-slow w danej stronie
-      aktualizuje drzewo strony
-   args
-      tree - drzewo danej strony
-      page - dana strona
-      k    - dlugosc szukanego slotu w slowach, potega 2
-   return
-      ptr - adress do wolnego slotu o dlugosci k-slow, NULL gdy taki slot nie istnieje
+         Znajduje slot dlugosci k-slow w danej stronie
+         aktualizuje drzewo strony
+      args
+         tree - drzewo danej strony
+         page - dana strona
+         k    - dlugosc szukanego slotu w slowach, potega 2
+      return
+         ptr - adress do wolnego slotu o dlugosci k-slow, NULL gdy taki slot nie istnieje
    */
    size_t cur_len = PAGE_SIZE >> 2; // ilosc slow w aktualnym slotcie
    size_t offset = 0; // offset danego slotu
@@ -153,15 +174,14 @@ void *find_slot_page(void *tree, void *page, size_t k){
                continue;
             }
          }
-         else {
-            // go up
+         else { // go up
 
             if( wentleft & 2 ){
                --i;
             }
             else {
                i -= (2 << cur_len);
-               //offset -= ;
+               offset -= cur_len;
             }
 
             wentleft >>= 1;
@@ -171,15 +191,14 @@ void *find_slot_page(void *tree, void *page, size_t k){
          }
       }
       else {
-         if( cur_len == k ){
-            // go up
+         if( cur_len == k ){ // go up
             
             if( wentleft & 2 ){
                --i;
             }
             else {
                i -= (2 << cur_len);
-               //offset -= ;
+               offset -= cur_len;
             }
 
             wentleft >>= 1;
@@ -188,8 +207,7 @@ void *find_slot_page(void *tree, void *page, size_t k){
             continue;
          }
          else { //if( cur_len > k ){
-            if( !wentup ){
-               // go left
+            if( !wentup ){ // go left
 
                ++i;
                wentleft |= 1;
@@ -198,25 +216,24 @@ void *find_slot_page(void *tree, void *page, size_t k){
                continue;
             }
             else {
-               if( wentleft & 1 ){
-                  // go right
+               if( wentleft & 1 ){ // go right
 
-                  i += 2 << (cur_len>>1);
+                  cur_len >>= 1;
+                  i += 2 << (cur_len/*>>1*/);
+                  offset += cur_len/* >> 1*/;
                   wentleft &= ~1;
                   wentleft <<= 1;
-                  cur_len >>= 1;
                   wentup = false;
                   continue;
                }
-               else {
-                  // go up
+               else { // go up
 
                   if( wentleft & 2 ){
                      --i;
                   }
                   else {
                      i -= (2 << cur_len);
-                     //offset -= ;
+                     offset -= cur_len;
                   }
 
                   wentleft >>= 1;
@@ -231,54 +248,42 @@ void *find_slot_page(void *tree, void *page, size_t k){
 
    }
 
-
-   // {
-   //    if marged & free
-   //       if len == k
-   //          success
-   //       if len > k
-   //          split
-   //          wentleft |= 1;
-   //          wentleft <<= 1;
-   //          go left
-   //    if marged & not free
-   //       wentup=true
-   //       wentleft >>= 1;
-   //       go up
-   //    if not merged
-   //       if len == k
-   //          wentup=true
-   //          wentleft >>= 1;
-   //          go up
-   //       if len > k
-   //          if !wentup
-   //             wentleft |= 1;
-   //             wentleft <<= 1;
-   //             go left
-   //          if wentup and (wentleft & 1)
-   //             wentleft &= ~1;
-   //             wentleft <<= 1;
-   //             go right
-   //          if wentup and !(wentleft & 1)
-   //             wentleft >>= 1;
-   //             go up
-   // }
-
-
-
-
-
+   /*
+      if marged & free
+         if len == k
+            success
+         if len > k
+            split
+            wentleft true
+            go left
+      if marged & not free
+         wentup true
+         go up
+      if not merged
+         if len == k
+            wentup true
+            go up
+         if len > k
+            if !wentup
+               wentleft true
+               go left
+            if wentup and wentleft
+               wentleft fasle
+               go right
+            if wentup and !wentleft
+               go up
+   */
    return (uint32_t*)page + offset;
 }
 
 void *find_slot(size_t k){
-   /*
+/*
       Znajduje slot dlugosci k-slow w zarzadzanych stronach
    args
       k - dlugosc szukanego slotu w slowach, potega 2
    return
       ptr - adress do wolnego slotu o dlugosci k-slow, NULL gdy taki slot nie istnieje
-   */
+*/
    void *ptr = NULL;
    size_t i = 0;
    do{
@@ -289,5 +294,5 @@ void *find_slot(size_t k){
 }
 
 void add_page(){
-     
+   // to-do
 }
