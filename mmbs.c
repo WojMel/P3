@@ -73,14 +73,72 @@ void *realloc(void *ptr, size_t size){
 
 void free(void *ptr){
    // to-do
-
+   if( ptr == NULL || !MM_RUNNING || ptr&0x3 ) return;
    size_t i = 0;
    while( (ptr < page_adrs[i] || ptr >= (uint8_t)(page_adrs[i]) + PAGE_SIZE) && i < num_pages ) ++i;
    if( i >= num_pages ) return;
 
-   void *tree = 
+   size_t child_len = PAGE_SIZE >> 2;
+   uint32_t offset = (ptr - page) >> 2; 
+   uint32_t wentleft = 0;
+   void *tree = page_tree[i];
+   void *page = page_adrs[i];
+   i = 0;
 
-   // free slot and upadte tree
+   // go down - find leaf
+   while( 1 ){
+      child_len >>= 1;
+      wentleft <<= 1;
+
+      if( getbit( tree, i ) ){
+         if( ( child_len != 0 && !getbit( tree, i+1 ) ) || offset != 0 ) return;
+         clearbit( tree, i+1 );
+         break;
+      }
+      if( child_len == 0 ) return;
+
+      if( offset < child_len ){ // go left
+         // offset = offset
+         wentleft |= 1;
+         ++i;
+         continue;
+      }
+      else{ // go right
+         // wentleft &= ~1
+         offset -= child_len;
+         i += 1 << child_len;
+         continue;
+      }
+
+   }
+
+   size_t cur_len = (child_len) ? (child_len << 1) : (1);
+
+   // go up - merge free leaves
+   do{
+      // go up
+      i -=  ( wentleft & 2 ) ? (1) : (1 << cur_len);
+      wentleft >>= 1;
+      cur_len <<= 1;
+
+      // if both children merged and free - merge
+      // else - return
+
+      if( cur_len > 2){
+         if( !getbit( tree, i+1 ) || !getbit( tree, i+(1 << (cur_len>>1)) ) ) return; // one is split
+         if( getbit( tree, i+2 ) || getbit( tree, i+1+(1 << (cur_len>>1)) )) return; // one is not free
+
+         // clear children
+         clearbit( tree, i+1 );
+         clearbit( tree, i+(1 << (cur_len>>1)) );
+      }
+      else{ // children are single words
+         if( getbit( tree, i+1 ) || getbit( tree, i+2 ) ) return; // one is not free
+      }
+
+      setbit( tree, i ); // merge children
+   }while( i > 0 );
+   
 }
 
 static inline void to_slot_size(size_t *size){
@@ -165,7 +223,7 @@ void *find_slot_page(void *tree, void *page, size_t k){
                // go left
                clearbit( tree, i );
                setbit( tree, i );
-               setbit( tree, i+(2 << (cur_len>>1)) );
+               setbit( tree, i+(1 << (cur_len>>1)) );
 
                wentleft |= 1;
                wentleft <<= 1;
@@ -180,7 +238,7 @@ void *find_slot_page(void *tree, void *page, size_t k){
                --i;
             }
             else {
-               i -= (2 << cur_len);
+               i -= (1 << cur_len);
                offset -= cur_len;
             }
 
@@ -197,7 +255,7 @@ void *find_slot_page(void *tree, void *page, size_t k){
                --i;
             }
             else {
-               i -= (2 << cur_len);
+               i -= (1 << cur_len);
                offset -= cur_len;
             }
 
@@ -219,7 +277,7 @@ void *find_slot_page(void *tree, void *page, size_t k){
                if( wentleft & 1 ){ // go right
 
                   cur_len >>= 1;
-                  i += 2 << (cur_len/*>>1*/);
+                  i += 1 << (cur_len/*>>1*/);
                   offset += cur_len/* >> 1*/;
                   wentleft &= ~1;
                   wentleft <<= 1;
@@ -232,7 +290,7 @@ void *find_slot_page(void *tree, void *page, size_t k){
                      --i;
                   }
                   else {
-                     i -= (2 << cur_len);
+                     i -= (1 << cur_len);
                      offset -= cur_len;
                   }
 
@@ -249,14 +307,14 @@ void *find_slot_page(void *tree, void *page, size_t k){
    }
 
    /*
-      if marged & free
+      if merged & free
          if len == k
             success
          if len > k
             split
             wentleft true
             go left
-      if marged & not free
+      if merged & not free
          wentup true
          go up
       if not merged
