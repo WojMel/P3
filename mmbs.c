@@ -58,21 +58,95 @@ void *malloc(size_t size){
 }
 
 void *realloc(void *ptr, size_t size){
-   if( ptr == NULL ) return NULL;
+   if( ptr == NULL || ptr&0x3 ) return NULL;
    if( size == 0 ) { free(ptr); return NULL: }
    if( size > (PAGE_SIZE >> 1) ){
-      // free malloc cpmem
+      // to-do
+      return NULL;
    }
    if( !MM_RUNNING ){
       mm_startup();
    }
-   // usun z drzewa
-   // find slot
-   // jezeli inny adres cpymem
+
+
+   to_slot_size(&size);
+   size >>= 2;
+
+   // find page
+   size_t i = 0;
+   while( (ptr < page_adrs[i] || ptr >= (uint8_t)(page_adrs[i]) + PAGE_SIZE) && i < num_pages ) ++i;
+   if( i >= num_pages ) return NULL;
+
+   size_t child_len = PAGE_SIZE >> 2;
+   uint32_t offset = (ptr - page) >> 2; 
+   uint32_t new_offset = offset;
+   uint32_t wentleft = 0;
+   void *tree = page_tree[i];
+   void *page = page_adrs[i];
+   i = 0;
+   bool split = true;
+
+   // go down - find node or leaf
+   while( 1 ){
+      child_len >>= 1;
+
+      // leaf?
+      if( getbit( tree, i ) ){
+         if( ( child_len != 0 && !getbit( tree, i+1 ) ) || offset != 0 ) return NULL; // sth went wrong
+         if( size >> 1 == child_len ) return ptr; // leaf ?= node
+         break;
+      }
+      if( child_len == 0 ) return NULL;
+
+      if( child_len == size >> 1 ){ // node?
+         split = false;
+         break;         
+      }
+
+
+      if( offset < child_len ){ // go left
+         // offset = offset
+         ++i;
+      }
+      else{ // go right
+         offset -= child_len;
+         i += 1 << child_len;
+      }
+
+   }
+
+
+   if( split ){
+      // go down - split leaf
+      while(1){
+
+      }
+      return ptr;
+   }
+   else{
+      bool cpy = offset != 0;
+      new_offset -= offset;
+      // go down - find leaf - try merge to node
+      while(1){
+
+      }
+      size_t old_size = ;
+
+      // go up - clean tree
+      while(1){
+
+      }
+
+      if( cpy ) ; // cpymem 
+
+   }
+
+
+
 }
 
 void free(void *ptr){
-   // to-do
+   // find page
    if( ptr == NULL || !MM_RUNNING || ptr&0x3 ) return;
    size_t i = 0;
    while( (ptr < page_adrs[i] || ptr >= (uint8_t)(page_adrs[i]) + PAGE_SIZE) && i < num_pages ) ++i;
@@ -101,13 +175,11 @@ void free(void *ptr){
          // offset = offset
          wentleft |= 1;
          ++i;
-         continue;
       }
       else{ // go right
          // wentleft &= ~1
          offset -= child_len;
          i += 1 << child_len;
-         continue;
       }
 
    }
@@ -141,6 +213,21 @@ void free(void *ptr){
    
 }
 
+void *calloc(size_t nmemb, size_t size){
+   size *= nmemb;
+   void ptr* = malloc( size );
+
+   if(size&0x3) size = size&~0x3 + 4;
+   size >>= 2;
+   size_t i = 0;
+   while( i < size){
+      (uint32_t)ptr[i] ^= (uint32_t)ptr[i];
+      ++i; 
+   }
+   
+   return ptr;
+}
+
 static inline void to_slot_size(size_t *size){
    if( ! (*size >> 2) ){ *size = 4; return; }
    // https://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
@@ -153,6 +240,20 @@ static inline void to_slot_size(size_t *size){
    *size |= *size >> 32;
    ++*size;
 }
+
+/*
+uint8_t MSBidx(uint64_t n){
+   uint8_t idx = 0;
+
+   if( n & 0xffffffff00000000 ){ n >>= 32; idx = 32; }
+   if( n & 0xffff0000 ){ n >>= 16; idx |= 16; }
+   if( n & 0xff00 ){ n >>= 8; idx |= 8; }
+   if( n & 0xf0 ){ n >>= 4; idx |= 4; }
+   if( n & 0xc ){ n >>= 2; idx |= 2; }
+   //if( n & 0x2 ){ n >>= 1; idx |= 1; }
+   //idx |= n>>1;
+   return idx | n>>1;
+}*/
 
 void mm_startup(){
    /*
