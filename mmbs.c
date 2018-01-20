@@ -1,5 +1,6 @@
 #include <unistd.h>
 #include <sys/mman.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 #define _nbit(i)             (i & 0x1f)
@@ -11,11 +12,21 @@
 #define togglebit(ptr, i)    _ibits(ptr,i) ^= 1 << _nbit(i)
 
 bool MM_RUNNING = false;
-size_t PAGE_SIZE = sysconf(_SC_PAGESIZE);
+size_t PAGE_SIZE;
 size_t num_pages = 0;
 void **page_tree = NULL;
 size_t page_adrs_cap = 0;
 void **page_adrs = NULL;
+
+void mm_startup();
+void *find_slot_page(void *tree, void *page, size_t k);
+void *find_slot(size_t k);
+static inline void to_slot_size(size_t *size);
+
+void *malloc(size_t size);
+void *realloc(void *ptr, size_t size);
+void free(void *ptr);
+void *calloc(size_t nmemb, size_t size);
 
 /*
    // strata 6.25% (1slowo per 16slow) dla PAGE_SIZE ktore sa wielokrotnoscia 16 slow
@@ -58,8 +69,8 @@ void *malloc(size_t size){
 }
 
 void *realloc(void *ptr, size_t size){
-   if( ptr == NULL || ptr&0x3 ) return NULL;
-   if( size == 0 ) { free(ptr); return NULL: }
+   if( ptr == NULL || (size_t)ptr&0x3 ) return NULL;
+   if( size == 0 ) { free(ptr); return NULL; }
    if( size > (PAGE_SIZE >> 1) ){
       // to-do
       return NULL;
@@ -74,15 +85,14 @@ void *realloc(void *ptr, size_t size){
 
    // find page
    size_t i = 0;
-   while( (ptr < page_adrs[i] || ptr >= (uint8_t)(page_adrs[i]) + PAGE_SIZE) && i < num_pages ) ++i;
+   while( (ptr < page_adrs[i] || ptr >= (void*)((uint8_t*)(page_adrs[i]) + PAGE_SIZE)) && i < num_pages ) ++i;
    if( i >= num_pages ) return NULL;
 
+   void *tree = page_tree[i];
+   void *page = page_adrs[i];
    size_t child_len = PAGE_SIZE >> 2;
    uint32_t offset = (ptr - page) >> 2; 
    uint32_t new_offset = offset;
-   uint32_t wentleft = 0;
-   void *tree = page_tree[i];
-   void *page = page_adrs[i];
    i = 0;
    bool split = true;
 
@@ -118,19 +128,26 @@ void *realloc(void *ptr, size_t size){
 
    if( split ){
       // go down - split leaf
-      while(1){
+      do{
+         clearbit( tree, i );
+         setbit( tree, i+1 );
+         if( !child_len&1 ) setbit( tree, i+(1 << child_len) );
 
-      }
+         ++i;
+         child_len >>= 1;
+      }while( child_len > size );
+      if( !child_len ) setbit( tree, i+1 );
       return ptr;
    }
    else{
+      uint32_t wentleft = 0;
       bool cpy = offset != 0;
       new_offset -= offset;
       // go down - find leaf - try merge to node
       while(1){
 
       }
-      size_t old_size = ;
+      size_t old_size = 0;
 
       // go up - clean tree
       while(1){
@@ -147,16 +164,16 @@ void *realloc(void *ptr, size_t size){
 
 void free(void *ptr){
    // find page
-   if( ptr == NULL || !MM_RUNNING || ptr&0x3 ) return;
+   if( ptr == NULL || !MM_RUNNING || (size_t)ptr&0x3 ) return;
    size_t i = 0;
-   while( (ptr < page_adrs[i] || ptr >= (uint8_t)(page_adrs[i]) + PAGE_SIZE) && i < num_pages ) ++i;
+   while( (ptr < page_adrs[i] || ptr >= (void*)((uint8_t*)(page_adrs[i]) + PAGE_SIZE)) && i < num_pages ) ++i;
    if( i >= num_pages ) return;
 
+   void *tree = page_tree[i];
+   void *page = page_adrs[i];
    size_t child_len = PAGE_SIZE >> 2;
    uint32_t offset = (ptr - page) >> 2; 
    uint32_t wentleft = 0;
-   void *tree = page_tree[i];
-   void *page = page_adrs[i];
    i = 0;
 
    // go down - find leaf
@@ -215,13 +232,13 @@ void free(void *ptr){
 
 void *calloc(size_t nmemb, size_t size){
    size *= nmemb;
-   void ptr* = malloc( size );
+   void *ptr = malloc( size );
 
    if(size&0x3) size = size&~0x3 + 4;
    size >>= 2;
    size_t i = 0;
    while( i < size){
-      (uint32_t)ptr[i] ^= (uint32_t)ptr[i];
+      ((uint32_t*)ptr)[i] ^= ((uint32_t*)ptr)[i];
       ++i; 
    }
    
@@ -261,6 +278,7 @@ void mm_startup(){
       na jej poczatku inicjuje liste drzew stron
       tworzy liste stron 
    */
+   PAGE_SIZE = sysconf(_SC_PAGESIZE);
    void *page = mmap(0, PAGE_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
 
    // temporary space for page_tree's and page_adres's
