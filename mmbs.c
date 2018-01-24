@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 
 #define _nbit(i)             ((i) & 0x1f)
 #define _ibits(ptr,i)        (((uint32_t*)(ptr))[ (i) >> 5 ])
@@ -41,7 +42,7 @@ static inline void to_slot_size(size_t *size);
          L i P to bity mowiace o zajeciu danego slowa gdy M jest 0 gdy 1 jak wyzej
 */
 
-void *malloc(size_t size){
+void *m_malloc(size_t size){
    if( size == 0 ) return NULL;
 
    if( !MM_RUNNING ){
@@ -66,9 +67,9 @@ void *malloc(size_t size){
    return ptr;
 }
 
-void *realloc(void *ptr, size_t size){
+void *m_realloc(void *ptr, size_t size){
    if( ptr == NULL || (size_t)ptr&0x3 ) return NULL;
-   if( size == 0 ) { free(ptr); return NULL; }
+   if( size == 0 ) { m_free(ptr); return NULL; }
    if( size > (PAGE_SIZE >> 1) ){
       // to-do
       return NULL;
@@ -148,7 +149,7 @@ void *realloc(void *ptr, size_t size){
       while( 1 ){
 
          if( offset < child_len ){ // go left
-            // is R free?
+            // is R m_free?
             if( (child_len == 1 && getbit( tree, i+2 )) || (child_len > 1 && (!getbit( tree, i+(1<<child_len)) || getbit( tree, i+(1<<child_len)+1 )) ))
                { merge = false; break; } // (L=1 ^ Fword) v ( L>1 ^ ( not M v ( M ^ not F )  ) )
             
@@ -156,7 +157,7 @@ void *realloc(void *ptr, size_t size){
             ++i;
          }
          else{ // go right
-            if( (child_len == 1 && getbit( tree, i+1 )) || (child_len > 1 && (!getbit(tree, i+1) || getbit(tree, i+2)) )) // L is not free
+            if( (child_len == 1 && getbit( tree, i+1 )) || (child_len > 1 && (!getbit(tree, i+1) || getbit(tree, i+2)) )) // L is not m_free
                { merge = false; break; }
 
             offset -= child_len;
@@ -190,15 +191,15 @@ void *realloc(void *ptr, size_t size){
       }
 
 
-      free(ptr);
-      new_ptr = malloc(size<<2);
+      m_free(ptr);
+      new_ptr = m_malloc(size<<2);
       if( new_ptr == NULL ) return NULL;
       return memmove(new_ptr, ptr, old_size<<2);
    }
 
 }
 
-void free(void *ptr){
+void m_free(void *ptr){
    // find page
    if( ptr == NULL || !MM_RUNNING || (size_t)ptr&0x3 ) return;
    size_t i = 0;
@@ -211,19 +212,28 @@ void free(void *ptr){
    uint32_t offset = (ptr - page) >> 2; 
    uint32_t wentleft = 0;
    i = 0;
+   ///////////printf("free starts\noffset = %u\n",offset);
 
    // go down - find leaf
    while( 1 ){
+      ///////////printf("+offset = %u\tlen = %lu\n",offset,child_len);
       child_len >>= 1;
       wentleft <<= 1;
 
-      if( getbit( tree, i ) ){
+      if( getbit( tree, i ) ){ // merged / not free word
          if( ( child_len != 0 && !getbit( tree, i+1 ) ) || offset != 0 ) return;
-         clearbit( tree, i+1 );
+         if( child_len ) clearbit( tree, i+1 ); // if not word free
+         else{ // word
+            clearbit( tree, i );
+            if( (wentleft & 2) && !getbit( tree, i+1 ) ){ --i; setbit( tree, i ); wentleft >>= 1; }
+            else if( !(wentleft & 2) && !getbit( tree, i-1 ) ){ i-=2; setbit( tree, i); wentleft >>= 1; }
+            child_len = 1;
+         }
          break;
       }
       if( child_len == 0 ) return;
 
+      ///////////printf("<offset = %u\tlen = %lu\n",offset,child_len);
       if( offset < child_len ){ // go left
          // offset = offset
          wentleft |= 1;
@@ -232,35 +242,37 @@ void free(void *ptr){
       else{ // go right
          // wentleft &= ~1
          offset -= child_len;
-         i += 1 << child_len;
+         i += (child_len) ? (child_len << 1) : (1);
       }
+      ///////printf("-offset = %u\tlen = %lu\n",offset,child_len);
 
    }
 
-   size_t cur_len = (child_len) ? (child_len << 1) : (1);
+   //size_t cur_len = (child_len) ? (child_len << 1) : (1);
+      /////printf("offset = %u\tlen = %lu\n",offset,cur_len);
 
-   merge_leaves(tree, i, wentleft, cur_len);
+   merge_leaves(tree, i, wentleft, child_len << 1);
 /*
-   // go up - merge free leaves
+   // go up - merge m_free leaves
    do{
       // go up
       i -=  ( wentleft & 2 ) ? (1) : (1 << cur_len);
       wentleft >>= 1;
       cur_len <<= 1;
 
-      // if both children merged and free - merge
+      // if both children merged and m_free - merge
       // else - return
 
       if( cur_len > 2){
          if( !getbit( tree, i+1 ) || !getbit( tree, i+(1 << (cur_len>>1)) ) ) return; // one is split
-         if( getbit( tree, i+2 ) || getbit( tree, i+1+(1 << (cur_len>>1)) )) return; // one is not free
+         if( getbit( tree, i+2 ) || getbit( tree, i+1+(1 << (cur_len>>1)) )) return; // one is not m_free
 
          // clear children
          clearbit( tree, i+1 );
          clearbit( tree, i+(1 << (cur_len>>1)) );
       }
       else{ // children are single words
-         if( getbit( tree, i+1 ) || getbit( tree, i+2 ) ) return; // one is not free
+         if( getbit( tree, i+1 ) || getbit( tree, i+2 ) ) return; // one is not m_free
       }
 
       setbit( tree, i ); // merge children
@@ -268,9 +280,9 @@ void free(void *ptr){
 */
 }
 
-void *calloc(size_t nmemb, size_t size){
+void *m_calloc(size_t nmemb, size_t size){
    size *= nmemb;
-   void *ptr = malloc( size );
+   void *ptr = m_malloc( size );
 
    if(size&0x3) size = (size&~0x3) + 4;
    size >>= 2;
@@ -316,9 +328,8 @@ void mm_startup(){
       na jej poczatku inicjuje liste drzew stron
       tworzy liste stron 
    */
-   PAGE_SIZE = sysconf(_SC_PAGESIZE);
+   PAGE_SIZE = sysconf(_SC_PAGESIZE) >>5;
    void *page = mmap(0, PAGE_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
-
    // temporary space for page_tree's and page_adres's
    void *temp_page_tree[1];
    void *temp_page_adrs[1];
@@ -348,38 +359,58 @@ void mm_startup(){
 
 void merge_leaves(void *tree, size_t i, size_t wentleft, size_t cur_len){
    /*
-      Starts at free leaf and goes up merging free children
+      Starts at m_free leaf and goes up merging free children
       args
          tree     - tree pointer 
          i        - starting positon
          wentleft - 
          cur_len  -
    */
+   int j;
+   printf("\nmerge:\n");
    do{
+   
+   for(j=0;j<PAGE_SIZE>>1;++j)
+      putchar('0'+getbit(page_adrs[0],j));
+   putchar('\n');
+   print_tree(0);
       // go up
-      i -=  ( wentleft & 2 ) ? (1) : (1 << cur_len);
       wentleft >>= 1;
       cur_len <<= 1;
+      i -=  ( wentleft & 1 ) ? 1 : cur_len;
 
-      // if both children merged and free - merge
+      // if both children merged and m_free - merge
       // else - return
 
+         printf("\n0 len=%lu\t i=%lu\n",cur_len,i);
+         for(j=i;j<PAGE_SIZE>>1;++j)
+            putchar('0'+getbit(page_adrs[0],j));
+         putchar('\n');
       if( cur_len > 2){
-         if( !getbit( tree, i+1 ) || !getbit( tree, i+(1 << (cur_len>>1)) ) ) return; // one is split
-         if( getbit( tree, i+2 ) || getbit( tree, i+1+(1 << (cur_len>>1)) )) return; // one is not free
+         printf("3\n");
+         if( !getbit( tree, i+1 ) || !getbit( tree, i+cur_len ) ) break; // one is split
+         printf("4\n");
+         if( getbit( tree, i+2 ) || getbit( tree, i+1+cur_len ) ) break; // one is not m_free
+         printf("5\n");
 
          // clear children
          clearbit( tree, i+1 );
-         clearbit( tree, i+(1 << (cur_len>>1)) );
+         clearbit( tree, i+cur_len );
       }
       else{ // children are single words
-         if( getbit( tree, i+1 ) || getbit( tree, i+2 ) ) return; // one is not free
+         printf("1\n");
+         if( getbit( tree, i+1 ) || getbit( tree, i+2 ) ) break; // one is not m_free
+         printf("2\n");
       }
 
       setbit( tree, i ); // merge children
    }while( i > 0 );
+   
+   for(j=0;j<PAGE_SIZE>>1;++j)
+      putchar('0'+getbit(page_adrs[0],j));
+   putchar('\n');
+   printf("^^^^^^^^^^^^\n");
 }
-
 
 void *find_slot_page(void *tree, void *page, size_t k){
    /*
@@ -399,137 +430,88 @@ void *find_slot_page(void *tree, void *page, size_t k){
    bool wentup = false;
 
    while( 1 ){
-      if( (cur_len!=1 && getbit( tree, i )) || (cur_len==1 && !getbit( tree, i )) ){
-         if( cur_len==1 || !getbit( tree, i+1 ) ){
-            if( cur_len == k ){
-               if( cur_len==1 ) setbit( tree, i );
-               else setbit( tree, i+1 );
-               //SUCCESS
-               break;
-            }
-            else { //if( cur_len > k ){
-               // go left
-               clearbit( tree, i );
-               setbit( tree, i );
-               setbit( tree, i+(1 << (cur_len>>1)) );
-
-               wentleft |= 1;
-               wentleft <<= 1;
-               ++i;
-               cur_len >>= 1;
-               continue;
-            }
-         }
-         else { // go up
-
-            if( wentleft & 2 ){
-               --i;
-            }
-            else {
-               i -= (1 << cur_len);
-               offset -= cur_len;
-            }
-
-            wentleft >>= 1;
-            cur_len <<= 1;
-            wentup = true;
-            continue;
-         }
-      }
-      else {
-         if( cur_len == k ){ // go up
+      
+      if( cur_len==1 || getbit( tree, i ) ){ //merged or word
+         if( (cur_len==1 && !getbit( tree, i )) || (cur_len!=1 && !getbit( tree, i+1 )) ){ //free
             
-            if( wentleft & 2 ){
-               --i;
-            }
-            else {
-               i -= (1 << cur_len);
-               offset -= cur_len;
-            }
+            if( cur_len > k )
+               clearbit( tree, i ); //begin split
+            while( cur_len > k ){
+               if(cur_len>2) setbit( tree, i+cur_len ); //set P merged
 
-            wentleft >>= 1;
-            cur_len <<= 1;
-            wentup = true;
-            continue;
-         }
-         else { //if( cur_len > k ){
-            if( !wentup ){ // go left
-
+               // go left
                ++i;
-               wentleft |= 1;
-               wentleft <<= 1;
                cur_len >>= 1;
-               continue;
-            }
-            else {
-               if( wentleft & 1 ){ // go right
-
-                  cur_len >>= 1;
-                  i += 1 << (cur_len/*>>1*/);
-                  offset += cur_len/* >> 1*/;
-                  wentleft &= ~1;
-                  wentleft <<= 1;
-                  wentup = false;
-                  continue;
-               }
-               else { // go up
-
-                  if( wentleft & 2 ){
-                     --i;
-                  }
-                  else {
-                     i -= (1 << cur_len);
-                     offset -= cur_len;
-                  }
-
-                  wentleft >>= 1;
-                  cur_len <<= 1;
-                  // wentup = true;
-                  continue;
-               }
             }
 
+            // set not free
+            if( cur_len!=1 ) setbit( tree, i+1 );
+            setbit( tree, i );
+            //SUCCESS
+            
+            break;
          }
+         
+         // not free -> go up
+         wentleft >>= 1;
+         cur_len <<= 1;
+         wentup = true;
+         if( wentleft & 1 ){
+            --i;
+         }
+         else {
+            i -= cur_len;
+            offset -= cur_len>>1;
+         }
+
+         continue;
+      }
+      
+      if( cur_len == k || (wentup && !(wentleft&1)) ){ // go up
+         wentleft >>= 1;
+         cur_len <<= 1;
+         wentup = true;
+         
+         if( wentleft & 1 ){
+            --i;
+         }
+         else {
+            i -= cur_len;
+            offset -= cur_len>>1;
+         }
+
+         continue;
       }
 
+      if( !wentup ){ // go left
+         ++i;
+         wentleft |= 1;
+         wentleft <<= 1;
+         cur_len >>= 1;
+         continue;
+      }
+      
+      // go right
+      i += cur_len;
+      cur_len >>= 1;
+      offset += cur_len;
+      wentleft &= ~1;
+      wentleft <<= 1;
+      wentup = false;
+      continue;
    }
 
-   /*
-      if merged & free
-         if len == k
-            success
-         if len > k
-            split
-            wentleft true
-            go left
-      if merged & not free
-         wentup true
-         go up
-      if not merged
-         if len == k
-            wentup true
-            go up
-         if len > k
-            if !wentup
-               wentleft true
-               go left
-            if wentup and wentleft
-               wentleft fasle
-               go right
-            if wentup and !wentleft
-               go up
-   */
    return (uint32_t*)page + offset;
 }
 
 void *find_slot(size_t k){
-/*
-      Znajduje slot dlugosci k-slow w zarzadzanych stronach
-   args
-      k - dlugosc szukanego slotu w slowach, potega 2
-   return
-      ptr - adress do wolnego slotu o dlugosci k-slow, NULL gdy taki slot nie istnieje
-*/
+   /*
+         Znajduje slot dlugosci k-slow w zarzadzanych stronach
+      args
+         k - dlugosc szukanego slotu w slowach, potega 2
+      return
+         ptr - adress do wolnego slotu o dlugosci k-slow, NULL gdy taki slot nie istnieje
+   */
    void *ptr = NULL;
    size_t i = 0;
    do{
@@ -539,6 +521,135 @@ void *find_slot(size_t k){
    return ptr;
 }
 
-void add_page(){
-   // to-do
+
+const char *sym = "-#";
+void _print_tree(void *tree){
+
+   size_t cur_len = PAGE_SIZE >> 2; // ilosc slow w aktualnym slotcie
+   size_t i = 0; // wskazuje na bit M aktualnego slotu
+   uint32_t wentleft = 0;
+   bool wentup = false;
+   bool leaf = false;
+   char c;
+
+   while( cur_len <= PAGE_SIZE>>2 ){
+      if( !wentup ){
+         if( cur_len==1 ){ leaf = true; putchar(sym[getbit( tree, i )]); } // word
+         else if( getbit( tree, i ) ){ // merged
+            leaf = true;
+            c = sym[getbit( tree, i+1 )]; 
+            size_t j = cur_len;
+            while( j ){
+               putchar(c);
+               --j;
+            }
+         }
+      }
+
+      if(leaf){
+         //go up
+         cur_len <<= 1;
+         wentleft >>= 1;
+         i -= ( wentleft & 1 ) ? 1 : cur_len;
+         wentup = true;
+         leaf = false;
+      }
+      else{
+         if( wentup ){
+            if( wentleft & 1 ){
+               // go right
+               wentleft &= ~1;
+               wentleft <<= 1;
+               i += cur_len;
+               cur_len >>= 1;
+               wentup = false;
+            }
+            else{
+               // go up
+               cur_len <<= 1;
+               wentleft >>= 1;
+               i -= ( wentleft & 1 ) ? 1 : cur_len;
+            }
+         }
+         else{
+            //go left
+            wentleft |= 1;
+            wentleft <<= 1;
+            cur_len >>= 1;
+            ++i;
+         }
+      }
+   }
+}
+
+void print_tree(size_t i){
+   if( i >= num_pages){ printf("Tree #%llu not found!\n", (unsigned long long)i); return; }
+   /*
+      wypisuje i-ta trone jako ciag slow oznaczonych:
+         '#' - zajete
+         '-' - wolne
+   */
+   _print_tree( page_tree[i]);
+}
+
+
+int main(){
+   printf("Program testujacy:\n");
+   mm_startup();
+   printf("PAGE_SIZE = %lu bytes = %lu words\nsize of page tree: %lu words\n",PAGE_SIZE,PAGE_SIZE>>2,PAGE_SIZE>>6);
+   void *page = page_adrs[0];
+   _print_tree(page);
+   putchar('\n');
+   
+   void *p = find_slot_page(page,page,8);
+
+   _print_tree(page);
+   putchar('\n');
+   putchar('\n');
+
+   
+   int j;
+   for(j=0;j<PAGE_SIZE>>1;++j)
+      putchar('0'+getbit(page,j));
+   putchar('\n');
+
+   m_free(p);
+   _print_tree(page);
+   putchar('\n');
+   
+   
+   p = find_slot_page(page,page,1);
+   void *p2 = find_slot_page(page,page,1);
+   void *p3 = find_slot_page(page,page,1);
+
+   //m_free(p);
+   _print_tree(page);
+   // putchar('\n');
+
+
+
+   printf("\npsuje sie:\n");
+    m_free(p3);
+    _print_tree(page);
+    putchar('\n');
+
+   m_free(p2);
+   _print_tree(page);
+   putchar('\n');
+
+   for(j=0;j<PAGE_SIZE>>1;++j)
+      putchar('0'+getbit(page,j));
+   putchar('\n');
+
+   
+   // m_free();
+   // setbit(page,4);
+   // clearbit(page,5);
+   // merge_leaves();
+
+   // for(j=0;j<PAGE_SIZE>>1;++j)
+   //    putchar('0'+getbit(page,j));
+   // putchar('\n');
+
+   return 0;
 }
