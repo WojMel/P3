@@ -1,7 +1,6 @@
 #include "mmbs.h"
 #include <unistd.h>
 #include <sys/mman.h>
-#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
@@ -23,7 +22,7 @@ void **page_adrs = NULL;
 
 void *find_slot_page(void *tree, void *page, size_t k);
 void *find_slot(size_t k);
-void merge_leaves(void *tree, size_t i, size_t wentleft, size_t cur_len);
+size_t merge_leaves(void *tree, size_t i, size_t wentleft, size_t cur_len, uint32_t steps);
 static inline void to_slot_size(size_t *size);
 
 /*
@@ -87,7 +86,7 @@ void *m_realloc(void *ptr, size_t size){
 
    void *tree = page_tree[i];
    void *page = page_adrs[i];
-   size_t child_len = PAGE_SIZE >> 2;
+   size_t cur_len = PAGE_SIZE >> 2;
    uint32_t offset = (ptr - page) >> 2; 
    uint32_t new_offset = offset;
    i = 0;
@@ -95,60 +94,64 @@ void *m_realloc(void *ptr, size_t size){
 
    // go down - find node or leaf
    while( 1 ){
-      child_len >>= 1;
 
       // leaf?
       if( getbit( tree, i ) ){
-         if( ( child_len != 0 && !getbit( tree, i+1 ) ) || offset != 0 ) return NULL; // sth went wrong
-         if( size >> 1 == child_len ) return ptr; // leaf ?= node
+         if( ( cur_len != 1 && !getbit( tree, i+1 ) ) || offset != 0 ) return NULL; // sth went wrong
+         if( size == cur_len ) return ptr; // leaf ?= node
          break;
       }
-      if( child_len == 0 ) return NULL;
+      if( cur_len == 1 ) return NULL;
 
-      if( child_len == size >> 1 ){ // node?
+      if( cur_len == size ){ // node?
          split = false;
          break;         
       }
 
 
-      if( offset < child_len ){ // go left
-         // offset = offset
+      if( offset < (cur_len>>1)){ // go left
          ++i;
       }
       else{ // go right
-         offset -= child_len;
-         i += 1 << child_len;
+         offset -= (cur_len>>1);
+         i += cur_len;
       }
 
+      cur_len >>= 1;
    }
 
 
+   size_t child_len = cur_len >> 1;
    if( split ){
       // go down - split leaf
       do{
          clearbit( tree, i );
          setbit( tree, i+1 );
-         if( !child_len&1 ) setbit( tree, i+(1 << child_len) );
+         if(cur_len>2) setbit( tree, i+cur_len );
 
+         cur_len >>= 1;
          ++i;
-         child_len >>= 1;
-      }while( child_len > size );
-      if( !child_len ) setbit( tree, i+1 );
+      }while( cur_len > size );
+      
+      if( cur_len>1 ) setbit( tree, i+1 );
       return ptr;
    }
    else{
+
       bool merge = true;
       //size_t cur_len = child_len << 1;
       uint32_t wentleft = 0;
       bool cpy = offset != 0;
       new_offset -= offset;
+      uint32_t steps = 0;
 
       // go down - find leaf - try merge to node
       while( 1 ){
+         steps ++;
 
          if( offset < child_len ){ // go left
             // is R m_free?
-            if( (child_len == 1 && getbit( tree, i+2 )) || (child_len > 1 && (!getbit( tree, i+(1<<child_len)) || getbit( tree, i+(1<<child_len)+1 )) ))
+            if( (child_len == 1 && getbit( tree, i+2 )) || (child_len > 1 && (!getbit( tree, i+(child_len<<1) ) || getbit( tree, i+(child_len<<1)+1 )) ))
                { merge = false; break; } // (L=1 ^ Fword) v ( L>1 ^ ( not M v ( M ^ not F )  ) )
             
             wentleft |= 1;
@@ -159,7 +162,7 @@ void *m_realloc(void *ptr, size_t size){
                { merge = false; break; }
 
             offset -= child_len;
-            i += 1 << child_len;
+            i += child_len;
          }
 
          
@@ -179,7 +182,8 @@ void *m_realloc(void *ptr, size_t size){
 
       if( merge ){
          
-         merge_leaves(tree, i, wentleft, child_len);
+         i = merge_leaves(tree, i, wentleft, child_len, steps);
+         setbit( tree, i+1 );
 
          new_ptr = (uint32_t*)page + new_offset;
 
@@ -242,7 +246,7 @@ void m_free(void *ptr){
    }
 
    //size_t cur_len = (child_len) ? (child_len << 1) : (1);
-   merge_leaves(tree, i, wentleft, child_len << 1);
+   merge_leaves(tree, i, wentleft, child_len << 1, 0);
 }
 
 void *m_calloc(size_t nmemb, size_t size){
@@ -305,20 +309,15 @@ void mm_startup(){
    page_tree[0] = page;
    setbit(page_tree[0], 0);
    // creating space for page_tree[0]
-   void *p = find_slot_page(page_tree[0], page_adrs[0], PAGE_SIZE >> 6); // == page_tree[0]
-   printf("first tree offset: %lu\n",(p-page)>>2);
+   find_slot_page(page_tree[0], page_adrs[0], PAGE_SIZE >> 6); // == page_tree[0]
 
    // creating space for page_tree
    page_tree = find_slot_page(page_tree[0], page_adrs[0], sizeof(void*)>>2);
-   printf("page_tree offset: %lu\n",((void*)page_tree-page)>>2);
    page_tree[0] = temp_page_tree[0];
-   printf("page_tree[0] offset: %lu\n",(page_tree[0]-page)>>2);
 
    // creating space for page_adrs
    page_adrs = find_slot_page(page_tree[0], page_adrs[0], sizeof(void*)>>2);
-   printf("page_adrs offset: %lu\n",((void*)page_adrs-page)>>2);
    page_adrs[0] = temp_page_adrs[0];
-   printf("page_adrs[0] offset: %lu\n",(page_adrs[0]-page)>>2);
 
    page_adrs_cap = 1;
    //page_adrs[0] = page;
@@ -327,7 +326,7 @@ void mm_startup(){
    MM_RUNNING = true;
 }
 
-void merge_leaves(void *tree, size_t i, size_t wentleft, size_t cur_len){
+size_t merge_leaves(void *tree, size_t i, size_t wentleft, size_t cur_len, uint32_t steps){
    /*
       Starts at m_free leaf and goes up merging free children
       args
@@ -335,7 +334,9 @@ void merge_leaves(void *tree, size_t i, size_t wentleft, size_t cur_len){
          i        - starting positon
          wentleft - 
          cur_len  -
+         steps    - 0==inf
    */
+   bool inf = steps == 0;
    do{
       // go up
       wentleft >>= 1;
@@ -358,7 +359,9 @@ void merge_leaves(void *tree, size_t i, size_t wentleft, size_t cur_len){
       }
 
       setbit( tree, i ); // merge children
-   }while( i > 0 );
+      if(!inf) --steps;
+   }while( i > 0 && (steps || inf ));
+   return i;
 }
 
 void *find_slot_page(void *tree, void *page, size_t k){
@@ -530,55 +533,24 @@ void _print_tree(void *tree){
    }
 }
 
-void _print_tree_bin(size_t i){
+bool mm_print_tree_bin(size_t i){
+   if( i >= num_pages) return false;//{ printf("Tree #%llu not found!\n", (unsigned long long)i); return; }
+   printf("PAGE#%lu\n",i);
    void *tree = page_tree[i];
    int j;
    for(j=0;j<PAGE_SIZE>>1;++j)
       putchar('0'+getbit(tree,j));
+   return true;
 }
 
-void print_tree(size_t i){
-   if( i >= num_pages){ printf("Tree #%llu not found!\n", (unsigned long long)i); return; }
+bool mm_print_tree(size_t i){
+   if( i >= num_pages) return false;//{ printf("Tree #%llu not found!\n", (unsigned long long)i); return; }
    /*
       wypisuje i-ta trone jako ciag slow oznaczonych:
          '#' - zajete
          '-' - wolne
    */
-   printf("print tree offset:%lu\n",(page_tree[0]-page_adrs[0])>>2);
+   printf("PAGE#%lu\n",i);
    _print_tree( page_tree[i]);
-}
-
-
-int main(){
-   printf("Program testujacy:\n");
-   mm_startup();
-   printf("PAGE_SIZE = %lu bytes = %lu words\nsize of page tree: %lu words\n",PAGE_SIZE,PAGE_SIZE>>2,PAGE_SIZE>>6);
-
-   print_tree(0);
-   putchar('\n');
-   _print_tree_bin(0);
-   putchar('\n');
-   putchar('\n');
-
-   void *p = m_malloc(64);
-   if(p) printf("malloc(8) offset:%lu\n",(p-page_adrs[0])>>2);
-   else printf("malloc(8) NULL\n");
-   void *tree = page_adrs[0];
-   int j;
-   for(j=0;j<PAGE_SIZE>>1;++j)
-      putchar('0'+getbit(tree,j));
-   putchar('\n');
-   print_tree(0);
-   putchar('\n');
-   _print_tree_bin(0);
-   putchar('\n');
-   putchar('\n');
-
-   m_free(p);
-   print_tree(0);
-   putchar('\n');
-   _print_tree_bin(0);
-   putchar('\n');
-
-   return 0;
+   return true;
 }
