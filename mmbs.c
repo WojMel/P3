@@ -21,7 +21,6 @@ void **page_tree = NULL;
 size_t page_adrs_cap = 0;
 void **page_adrs = NULL;
 
-void mm_startup();
 void *find_slot_page(void *tree, void *page, size_t k);
 void *find_slot(size_t k);
 void merge_leaves(void *tree, size_t i, size_t wentleft, size_t cur_len);
@@ -48,7 +47,6 @@ void *m_malloc(size_t size){
    if( !MM_RUNNING ){
       mm_startup();
    }
-
    if( size > (PAGE_SIZE >> 1) ){
       // to do - give full pages
    }
@@ -212,11 +210,9 @@ void m_free(void *ptr){
    uint32_t offset = (ptr - page) >> 2; 
    uint32_t wentleft = 0;
    i = 0;
-   ///////////printf("free starts\noffset = %u\n",offset);
 
    // go down - find leaf
    while( 1 ){
-      ///////////printf("+offset = %u\tlen = %lu\n",offset,child_len);
       child_len >>= 1;
       wentleft <<= 1;
 
@@ -233,9 +229,7 @@ void m_free(void *ptr){
       }
       if( child_len == 0 ) return;
 
-      ///////////printf("<offset = %u\tlen = %lu\n",offset,child_len);
       if( offset < child_len ){ // go left
-         // offset = offset
          wentleft |= 1;
          ++i;
       }
@@ -244,40 +238,11 @@ void m_free(void *ptr){
          offset -= child_len;
          i += (child_len) ? (child_len << 1) : (1);
       }
-      ///////printf("-offset = %u\tlen = %lu\n",offset,child_len);
 
    }
 
    //size_t cur_len = (child_len) ? (child_len << 1) : (1);
-      /////printf("offset = %u\tlen = %lu\n",offset,cur_len);
-
    merge_leaves(tree, i, wentleft, child_len << 1);
-/*
-   // go up - merge m_free leaves
-   do{
-      // go up
-      i -=  ( wentleft & 2 ) ? (1) : (1 << cur_len);
-      wentleft >>= 1;
-      cur_len <<= 1;
-
-      // if both children merged and m_free - merge
-      // else - return
-
-      if( cur_len > 2){
-         if( !getbit( tree, i+1 ) || !getbit( tree, i+(1 << (cur_len>>1)) ) ) return; // one is split
-         if( getbit( tree, i+2 ) || getbit( tree, i+1+(1 << (cur_len>>1)) )) return; // one is not m_free
-
-         // clear children
-         clearbit( tree, i+1 );
-         clearbit( tree, i+(1 << (cur_len>>1)) );
-      }
-      else{ // children are single words
-         if( getbit( tree, i+1 ) || getbit( tree, i+2 ) ) return; // one is not m_free
-      }
-
-      setbit( tree, i ); // merge children
-   }while( i > 0 );
-*/
 }
 
 void *m_calloc(size_t nmemb, size_t size){
@@ -330,7 +295,7 @@ void mm_startup(){
    */
    PAGE_SIZE = sysconf(_SC_PAGESIZE) >>5;
    void *page = mmap(0, PAGE_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
-   // temporary space for page_tree's and page_adres's
+   // temporary space for page_tree and page_adr
    void *temp_page_tree[1];
    void *temp_page_adrs[1];
    page_tree = temp_page_tree;
@@ -340,18 +305,23 @@ void mm_startup(){
    page_tree[0] = page;
    setbit(page_tree[0], 0);
    // creating space for page_tree[0]
-   find_slot_page(page_tree[0], page_adrs[0], PAGE_SIZE >> 6); // == page_tree[0]
+   void *p = find_slot_page(page_tree[0], page_adrs[0], PAGE_SIZE >> 6); // == page_tree[0]
+   printf("first tree offset: %lu\n",(p-page)>>2);
 
    // creating space for page_tree
-   page_tree = find_slot_page(page_tree[0], page_adrs[0], sizeof(void*));
+   page_tree = find_slot_page(page_tree[0], page_adrs[0], sizeof(void*)>>2);
+   printf("page_tree offset: %lu\n",((void*)page_tree-page)>>2);
    page_tree[0] = temp_page_tree[0];
+   printf("page_tree[0] offset: %lu\n",(page_tree[0]-page)>>2);
 
    // creating space for page_adrs
-   page_adrs = find_slot_page(page_tree[0], page_adrs[0], sizeof(void*));
+   page_adrs = find_slot_page(page_tree[0], page_adrs[0], sizeof(void*)>>2);
+   printf("page_adrs offset: %lu\n",((void*)page_adrs-page)>>2);
    page_adrs[0] = temp_page_adrs[0];
+   printf("page_adrs[0] offset: %lu\n",(page_adrs[0]-page)>>2);
 
    page_adrs_cap = 1;
-   page_adrs[0] = page;
+   //page_adrs[0] = page;
    ++num_pages;
 
    MM_RUNNING = true;
@@ -366,14 +336,7 @@ void merge_leaves(void *tree, size_t i, size_t wentleft, size_t cur_len){
          wentleft - 
          cur_len  -
    */
-   int j;
-   printf("\nmerge:\n");
    do{
-   
-   for(j=0;j<PAGE_SIZE>>1;++j)
-      putchar('0'+getbit(page_adrs[0],j));
-   putchar('\n');
-   print_tree(0);
       // go up
       wentleft >>= 1;
       cur_len <<= 1;
@@ -382,34 +345,20 @@ void merge_leaves(void *tree, size_t i, size_t wentleft, size_t cur_len){
       // if both children merged and m_free - merge
       // else - return
 
-         printf("\n0 len=%lu\t i=%lu\n",cur_len,i);
-         for(j=i;j<PAGE_SIZE>>1;++j)
-            putchar('0'+getbit(page_adrs[0],j));
-         putchar('\n');
       if( cur_len > 2){
-         printf("3\n");
          if( !getbit( tree, i+1 ) || !getbit( tree, i+cur_len ) ) break; // one is split
-         printf("4\n");
          if( getbit( tree, i+2 ) || getbit( tree, i+1+cur_len ) ) break; // one is not m_free
-         printf("5\n");
 
          // clear children
          clearbit( tree, i+1 );
          clearbit( tree, i+cur_len );
       }
       else{ // children are single words
-         printf("1\n");
          if( getbit( tree, i+1 ) || getbit( tree, i+2 ) ) break; // one is not m_free
-         printf("2\n");
       }
 
       setbit( tree, i ); // merge children
    }while( i > 0 );
-   
-   for(j=0;j<PAGE_SIZE>>1;++j)
-      putchar('0'+getbit(page_adrs[0],j));
-   putchar('\n');
-   printf("^^^^^^^^^^^^\n");
 }
 
 void *find_slot_page(void *tree, void *page, size_t k){
@@ -515,12 +464,11 @@ void *find_slot(size_t k){
    void *ptr = NULL;
    size_t i = 0;
    do{
-      ptr = find_slot_page( ( (uint32_t*)page_tree + (PAGE_SIZE >> 4)*i ), page_adrs[i], k );
+      ptr = find_slot_page( *((void**)( (uint32_t*)page_tree + (PAGE_SIZE >> 6)*i )), page_adrs[i], k );
       ++i;
    }while( i < num_pages && ptr != NULL );
    return ptr;
 }
-
 
 const char *sym = "-#";
 void _print_tree(void *tree){
@@ -582,6 +530,13 @@ void _print_tree(void *tree){
    }
 }
 
+void _print_tree_bin(size_t i){
+   void *tree = page_tree[i];
+   int j;
+   for(j=0;j<PAGE_SIZE>>1;++j)
+      putchar('0'+getbit(tree,j));
+}
+
 void print_tree(size_t i){
    if( i >= num_pages){ printf("Tree #%llu not found!\n", (unsigned long long)i); return; }
    /*
@@ -589,6 +544,7 @@ void print_tree(size_t i){
          '#' - zajete
          '-' - wolne
    */
+   printf("print tree offset:%lu\n",(page_tree[0]-page_adrs[0])>>2);
    _print_tree( page_tree[i]);
 }
 
@@ -597,59 +553,32 @@ int main(){
    printf("Program testujacy:\n");
    mm_startup();
    printf("PAGE_SIZE = %lu bytes = %lu words\nsize of page tree: %lu words\n",PAGE_SIZE,PAGE_SIZE>>2,PAGE_SIZE>>6);
-   void *page = page_adrs[0];
-   _print_tree(page);
-   putchar('\n');
-   
-   void *p = find_slot_page(page,page,8);
 
-   _print_tree(page);
+   print_tree(0);
+   putchar('\n');
+   _print_tree_bin(0);
    putchar('\n');
    putchar('\n');
 
-   
+   void *p = m_malloc(64);
+   if(p) printf("malloc(8) offset:%lu\n",(p-page_adrs[0])>>2);
+   else printf("malloc(8) NULL\n");
+   void *tree = page_adrs[0];
    int j;
    for(j=0;j<PAGE_SIZE>>1;++j)
-      putchar('0'+getbit(page,j));
+      putchar('0'+getbit(tree,j));
+   putchar('\n');
+   print_tree(0);
+   putchar('\n');
+   _print_tree_bin(0);
+   putchar('\n');
    putchar('\n');
 
    m_free(p);
-   _print_tree(page);
+   print_tree(0);
    putchar('\n');
-   
-   
-   p = find_slot_page(page,page,1);
-   void *p2 = find_slot_page(page,page,1);
-   void *p3 = find_slot_page(page,page,1);
-
-   //m_free(p);
-   _print_tree(page);
-   // putchar('\n');
-
-
-
-   printf("\npsuje sie:\n");
-    m_free(p3);
-    _print_tree(page);
-    putchar('\n');
-
-   m_free(p2);
-   _print_tree(page);
+   _print_tree_bin(0);
    putchar('\n');
-
-   for(j=0;j<PAGE_SIZE>>1;++j)
-      putchar('0'+getbit(page,j));
-   putchar('\n');
-
-   
-   // m_free();
-   // setbit(page,4);
-   // clearbit(page,5);
-   // merge_leaves();
-
-   // for(j=0;j<PAGE_SIZE>>1;++j)
-   //    putchar('0'+getbit(page,j));
-   // putchar('\n');
 
    return 0;
 }
