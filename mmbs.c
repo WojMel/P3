@@ -17,7 +17,7 @@ bool MM_RUNNING = false;
 size_t PAGE_SIZE;
 size_t num_pages = 0;
 void **page_tree = NULL;
-size_t page_adrs_cap = 0;
+size_t page_adrs_cap = 0;  // page_adrs_cap > num_pages
 void **page_adrs = NULL;
 
 void *find_slot_page(void *tree, void *page, size_t k);
@@ -297,7 +297,7 @@ void mm_startup(){
       na jej poczatku inicjuje liste drzew stron
       tworzy liste stron 
    */
-   PAGE_SIZE = sysconf(_SC_PAGESIZE) >>5;
+   PAGE_SIZE = sysconf(_SC_PAGESIZE);
    void *page = mmap(0, PAGE_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
    // temporary space for page_tree and page_adr
    void *temp_page_tree[1];
@@ -312,14 +312,14 @@ void mm_startup(){
    find_slot_page(page_tree[0], page_adrs[0], PAGE_SIZE >> 6); // == page_tree[0]
 
    // creating space for page_tree
-   page_tree = find_slot_page(page_tree[0], page_adrs[0], sizeof(void*)>>2);
+   page_tree = find_slot_page(page_tree[0], page_adrs[0], sizeof(void*)>>3);
    page_tree[0] = temp_page_tree[0];
 
    // creating space for page_adrs
-   page_adrs = find_slot_page(page_tree[0], page_adrs[0], sizeof(void*)>>2);
+   page_adrs = find_slot_page(page_tree[0], page_adrs[0], sizeof(void*)>>3);
    page_adrs[0] = temp_page_adrs[0];
 
-   page_adrs_cap = 1;
+   page_adrs_cap = 2;
    //page_adrs[0] = page;
    ++num_pages;
 
