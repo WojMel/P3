@@ -2,3 +2,4 @@ mmbs.o
 mmbs.so
 test
 test.o
+man_malloc

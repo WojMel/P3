@@ -312,11 +312,11 @@ void mm_startup(){
    find_slot_page(page_tree[0], page_adrs[0], PAGE_SIZE >> 6); // == page_tree[0]
 
    // creating space for page_tree
-   page_tree = find_slot_page(page_tree[0], page_adrs[0], sizeof(void*)>>3);
+   page_tree = find_slot_page(page_tree[0], page_adrs[0], sizeof(void*)>>1);
    page_tree[0] = temp_page_tree[0];
 
    // creating space for page_adrs
-   page_adrs = find_slot_page(page_tree[0], page_adrs[0], sizeof(void*)>>3);
+   page_adrs = find_slot_page(page_tree[0], page_adrs[0], sizeof(void*)>>1);
    page_adrs[0] = temp_page_adrs[0];
 
    page_adrs_cap = 2;
