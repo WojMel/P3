@@ -65,7 +65,9 @@ void *m_malloc(size_t size){
 }
 
 void *m_realloc(void *ptr, size_t size){
-   if( ptr == NULL || (size_t)ptr&0x3 ) return NULL;
+   if( ptr == NULL ) return m_malloc(size);
+   if( (size_t)ptr&0x3 ) return NULL;
+   //if( ptr == NULL || (size_t)ptr&0x3 ) return NULL;
    if( size == 0 ) { m_free(ptr); return NULL; }
    if( size > (PAGE_SIZE >> 1) ){
       // to-do
